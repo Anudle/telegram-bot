@@ -16,7 +16,7 @@ const CHEERS = {
   ALA: 'Roll Tide',
   MICH: 'Go Blue',
   COLO: 'Sko Buffs',
-  CSU: 'whoever went to CSU around here is better than everyone else. thank you',
+  CSU: 'I said it SUCKS to be a CSU RAM!',
 }
 
 // gameId -> last seen state string ('pre' | 'in' | 'post')
