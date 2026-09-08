@@ -1,18 +1,18 @@
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 const axios = require("axios");
-const moment = require("moment-timezone")
 const FACT_URL = 'https://uselessfacts.jsph.pl/random.json?language=en'
-const INSULT_URL = 'https://insult.mattbas.org/api/insult.json'
 const STOCK_URL = 'https://finnhub.io/api/v1/'
-const CRYPTO_URL = `https://rest.coinapi.io`
 const token = process.env.TOKEN;
-const revolution = process.env.OUR_CHAT_ID
+// Two groups: birthdays go to the dad chat, live scores to the football chat.
+// OUR_CHAT_ID is kept as a fallback so the old single-chat .env still works.
+const dadChat = process.env.DAD_CHAT_ID || process.env.OUR_CHAT_ID
+const footballChat = process.env.FOOTBALL_CHAT_ID || process.env.OUR_CHAT_ID
 const express = require('express')
-const bodyParser = require('body-parser');
 const { kylesAPI, getGif, getRandomPhoto, getTextOnPhoto} = require('./api')
-const { getRandomInt, ucfirst, findString, today, isToday } = require('./util');
+const { getRandomInt, ucfirst, findString, isToday } = require('./util');
 const schedule = require('node-schedule');
+const scores = require('./scores');
 
 
 
@@ -25,20 +25,19 @@ if (process.env.NODE_ENV === 'production') {
   bot = new TelegramBot(token, { polling: true });
 }
 
+// Each group can have its own bot identity (e.g. @kids_birthday_bot in the
+// dad chat, @final_score_bot in the football chat). Create each in BotFather
+// and drop the tokens in .env. These bots only send, so they never poll;
+// they fall back to the main bot if a token isn't set.
+const sendOnlyBot = (t) => (t && t !== token ? new TelegramBot(t) : bot)
+const birthdayBot = sendOnlyBot(process.env.BIRTHDAY_BOT_TOKEN)
+const scoreBot = sendOnlyBot(process.env.SCORE_BOT_TOKEN)
+
 const brock_bets = [' bet ', 'betting']
-const gif_trigger = ['gme', 'amc', 'stonk', 'to the moon', 'wallstreetbets', 'wsb', 'yolo', 'diamond hand', 'autist', 'roll tide', 'rtr', 'go blue', 'sko buffs', 'denver lynx']
+const gif_trigger = ['roll tide', 'rtr', 'go blue', 'sko buffs', 'denver lynx']
 const insult_trigger = ['ohio state', 'the sun', 'auburn', 'lsu']
 const insult_search = ['shit', 'sucks', 'chump', 'loser', 'stupid']
 const david_compliments = ['Roll tide my dude', 'you make a good point', "God you're so handsome David", 'Auburn is the worst', 'Can ABC just make you in charge of Disney already', 'How do you walk around with such a huge package David?']
-const timeZoneWatchers = ['mdt', 'edt', 'cdt', 'pdt', 'cst']
-const timeZoneMap = {
-  'mdt': 'America/Denver',
-  'cdt': 'America/Chicago',
-  'edt': 'America/New_York',
-  'pdt': 'America/Los_Angeles',
-  'cst': 'Asia/Shanghai'
-}
-
 const dates =  [
   { date: '2011-03-14T10:00:00Z', msg: 'Happy Pi Day!' },
   { date: '2011-04-15T10:00:00Z', msg: 'Happy Birthday Anu!'},
@@ -55,33 +54,19 @@ const job = schedule.scheduleJob('15 11 * * *', function(){
   for(let i=0; i<dates.length; i++) {
     let d = new Date(dates[i].date)
     if (isToday(d))  {
-      bot.sendMessage(revolution, dates[i].msg)
+      if (dadChat) birthdayBot.sendMessage(dadChat, dates[i].msg)
     }
   }
 });
+
+if (footballChat) {
+  scores.start(scoreBot, footballChat)
+}
 
 bot.on('text', async (ctx) => {
   const chat_id = ctx.chat.id
   const string = ctx.text.toLowerCase()
   const name = ctx.from.first_name.toLowerCase()
-  if (timeZoneWatchers.some(value => string.includes(value))) {
-    const timeZone = timeZoneWatchers.filter(zone => string.includes(zone))
-    const index = string.indexOf(timeZone)
-    let newString = string.slice(0, index)
-    let hour = newString.match(/\d+/g)[0]
-    if (hour && hour < 13 && hour > 0) {
-      let pmOrAM = string.includes('am') && !string.includes('pm') ? 'AM' : 'PM'
-      let time = `${today()} ${hour}${pmOrAM}`
-      const UTC = moment.tz(`${time}`, "YYYY-MM-DD HHa", `${timeZoneMap[timeZone]}`).format();
-      const shanghai = moment.utc(`${UTC}`).tz('Asia/Shanghai').format("hh:mm a")
-      const chicago = moment.utc(`${UTC}`).tz('America/Chicago').format("hh:mm a")
-      const la = moment.utc(`${UTC}`).tz('America/Los_Angeles').format("hh:mm a")
-      const ny = moment.utc(`${UTC}`).tz('America/New_York').format("hh:mm a")
-      const denver = moment.utc(`${UTC}`).tz('America/Denver').format("hh:mm a")
-      bot.sendMessage(chat_id, `Shanghai: ${shanghai} \nNew York: ${ny}\nChicago: ${chicago}\nDenver ${denver}\nLos Angeles: ${la}`)
-    }
-  }
-
   // if (name === 'david') {
   //   const randomNumber = getRandomInt(20)
   //   if (randomNumber === 5) {
@@ -119,9 +104,6 @@ bot.on('text', async (ctx) => {
         return word
       }
     })
-    if (searchWord.includes('autist')) {
-      searchWord.unshift('rain man')
-    }
     if (searchWord.includes('sko buffs')) {
       searchWord.unshift('colorado buffs')
     }
@@ -148,54 +130,6 @@ bot.on('text', async (ctx) => {
   if (string.includes('csu')) {
     bot.sendMessage(chat_id, 'whoever went to CSU around here is better than everyone else. thank you')
   }
-  if (string.includes('insult')) {
-    let stringArray = string.split(' ')
-    let insult_name_index = stringArray.indexOf('insult') + 1
-    let insult_name = stringArray[insult_name_index]
-    if (insult_name.toLowerCase() === 'asdfasdf') {
-      bot.sendMessage(chat_id, "I'm sorry, I can't insult my bot father")
-    } else {
-      try {
-        const response = await axios.get(INSULT_URL)
-        let insultArray = response.data.insult.split(' ')
-        if (response) {
-          insultArray = insultArray.splice(2, insultArray.length)
-          insultArray.unshift(`${ucfirst(insult_name)} is`)
-          bot.sendMessage(chat_id, insultArray.join(' '))
-        }
-      } catch(e){
-        console.log(e)
-        bot.sendMessage(chat_id, "Not today I'm broken")
-      }
-    }
-  }
-
-  if (string.includes('!')){
-    let symbol = await findString(string, '!')
-    if (symbol) {
-      symbol = symbol.toUpperCase()
-      try{
-        axios.interceptors.request.use(function (config) {
-          config.headers['X-CoinAPI-Key'] = 'AA5DA641-E789-435E-8C32-CB033E2C6AF7'
-          return config;
-        });
-        const exchangeURL = `${CRYPTO_URL}/v1/symbols/BINANCEFTS`
-        const symbolsList = await axios.get(exchangeURL)
-        if (symbolsList.data && symbolsList.data.length) {
-          let filtered = symbolsList.data.filter(obj => {
-            return obj.asset_id_base_exchange === symbol
-          })
-          if (filtered.length) {
-            let price = filtered[filtered.length - 1].price
-            bot.sendMessage(chat_id, `${symbol} last price was $${price}`)  
-          }
-        }
-        } catch(e) {
-          console.log(e)
-        }
-    }
-  }
-
   const trigger = 'bot quote'
   if (string.includes(trigger)) {
   let quote = string.slice(string.indexOf(trigger) + trigger.length).trim();
@@ -289,7 +223,7 @@ bot.on('callback_query', (callbackQuery) => {
 
 const app = express();
 
-app.use(bodyParser.json());
+app.use(express.json());
 
 app.listen(process.env.PORT);
 
