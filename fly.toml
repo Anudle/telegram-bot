@@ -1,0 +1,14 @@
+# fly.io config for the Telegram bots. Long-polling, so no public port and
+# the machine must stay running (no http_service / auto_stop).
+app = 'telegram-dad-bots'
+primary_region = 'dfw'
+
+[build]
+
+[[mounts]]
+  source = 'data'
+  destination = '/data'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

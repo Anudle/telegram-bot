@@ -13,25 +13,76 @@ const { kylesAPI, getGif, getRandomPhoto, getTextOnPhoto} = require('./api')
 const { getRandomInt, ucfirst, findString, isToday } = require('./util');
 const schedule = require('node-schedule');
 const scores = require('./scores');
+const { logMessage, logFinal, chatsWithMessages } = require('./db');
+const { postWrapped } = require('./wrapped');
 
 
-
-let bot;
-
-if (process.env.NODE_ENV === 'production') {
-  bot = new TelegramBot(token);
-  bot.setWebHook(process.env.HEROKU_URL + "/" + bot.token);
-} else {
-  bot = new TelegramBot(token, { polling: true });
-}
 
 // Each group can have its own bot identity (e.g. @kids_birthday_bot in the
 // dad chat, @final_score_bot in the football chat). Create each in BotFather
-// and drop the tokens in .env. These bots only send, so they never poll;
-// they fall back to the main bot if a token isn't set.
-const sendOnlyBot = (t) => (t && t !== token ? new TelegramBot(t) : bot)
-const birthdayBot = sendOnlyBot(process.env.BIRTHDAY_BOT_TOKEN)
-const scoreBot = sendOnlyBot(process.env.SCORE_BOT_TOKEN)
+// and drop the tokens in .env. Every bot receives updates from the groups it
+// is in so the message log (and the year-end Wrapped) covers every chat.
+const app = express();
+app.use(express.json());
+
+const makeBot = (t) => {
+  let b
+  // Webhook mode only when a public URL is configured; otherwise long-poll,
+  // which works on any host with no inbound port.
+  if (process.env.WEBHOOK_URL) {
+    b = new TelegramBot(t);
+    b.setWebHook(process.env.WEBHOOK_URL + "/" + t);
+    app.post('/' + t, (req, res) => { b.processUpdate(req.body); res.sendStatus(200); });
+  } else {
+    b = new TelegramBot(t, { polling: true });
+  }
+  b.on('message', (msg) => { try { logMessage(msg) } catch (e) { console.error('log failed', e.message) } })
+  return b
+}
+
+const bot = makeBot(token)
+const birthdayBot = process.env.BIRTHDAY_BOT_TOKEN && process.env.BIRTHDAY_BOT_TOKEN !== token ? makeBot(process.env.BIRTHDAY_BOT_TOKEN) : bot
+const scoreBot = process.env.SCORE_BOT_TOKEN && process.env.SCORE_BOT_TOKEN !== token ? makeBot(process.env.SCORE_BOT_TOKEN) : bot
+const allBots = [...new Set([bot, birthdayBot, scoreBot])]
+
+// "bot wrapped" in any group posts that group's Wrapped on demand.
+// "bot wrapped 2025" does a past year.
+for (const b of allBots) {
+  b.on('text', async (msg) => {
+    const text = msg.text.toLowerCase().trim()
+    try {
+      // "bot wrapped" / "bot wrapped 2025"
+      const m = text.match(/^bot wrapped(?:\s+(\d{4}))?$/)
+      if (m) {
+        const year = m[1] ? Number(m[1]) : new Date().getFullYear()
+        return await postWrapped(b, msg.chat.id, msg.chat.title, year)
+      }
+      // setup + testing helpers
+      if (text === '/chatid' || text === 'bot chatid') {
+        return await b.sendMessage(msg.chat.id, `chat id: <code>${msg.chat.id}</code>`, { parse_mode: 'HTML' })
+      }
+      if (text === 'bot scores') {
+        return await b.sendMessage(msg.chat.id, await scores.todaySummary(), { parse_mode: 'HTML' })
+      }
+      if (text === 'bot test final') {
+        return await b.sendMessage(msg.chat.id, scores.sampleFinal(), { parse_mode: 'HTML' })
+      }
+    } catch (e) { console.error('command failed', e) }
+  })
+}
+
+// Dec 31 at 10:00: post a Wrapped to every chat that had messages this year.
+schedule.scheduleJob('0 10 31 12 *', async () => {
+  const year = new Date().getFullYear()
+  const from = Math.floor(Date.UTC(year, 0, 1) / 1000), to = Math.floor(Date.UTC(year + 1, 0, 1) / 1000)
+  for (const { chat_id, title } of chatsWithMessages(from, to)) {
+    // pick whichever bot is a member of this chat; sendMessage from a
+    // non-member fails, so try each until one works
+    for (const b of allBots) {
+      try { await postWrapped(b, chat_id, title, year); break } catch (e) { /* try next bot */ }
+    }
+  }
+});
 
 const brock_bets = [' bet ', 'betting']
 const gif_trigger = ['roll tide', 'rtr', 'go blue', 'sko buffs', 'denver lynx']
@@ -60,6 +111,7 @@ const job = schedule.scheduleJob('15 11 * * *', function(){
 });
 
 if (footballChat) {
+  scores.setOnFinal((eventId, team, won, summary) => logFinal(footballChat, eventId, team, won, summary))
   scores.start(scoreBot, footballChat)
 }
 
@@ -221,13 +273,4 @@ bot.on('callback_query', (callbackQuery) => {
       .then(() => bot.sendMessage(msg.chat.id, "You clicked!"));
 });
 
-const app = express();
-
-app.use(express.json());
-
-app.listen(process.env.PORT);
-
-app.post('/' + bot.token, (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
+if (process.env.WEBHOOK_URL) app.listen(process.env.PORT || 3000);

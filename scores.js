@@ -77,6 +77,12 @@ const check = async () => {
     if (prev && prev !== 'post' && state === 'post') {
       const msg = finalMessage(event)
       if (msg) out.push(msg)
+      if (onFinal) {
+        for (const abbr of FOLLOW) {
+          const t = pickTeam(comp, abbr)
+          if (t) onFinal(event.id, abbr, !!t.winner, event.shortName)
+        }
+      }
     }
   }
   return out
@@ -86,6 +92,9 @@ const check = async () => {
 const LIVE_INTERVAL = 60 * 1000
 const IDLE_INTERVAL = 10 * 60 * 1000
 
+// Optional hook so finals can be recorded (used by the year-end Wrapped).
+let onFinal = null
+const setOnFinal = (fn) => { onFinal = fn }
 const start = (bot, chatId) => {
   let timer
   const tick = async () => {
@@ -103,4 +112,31 @@ const start = (bot, chatId) => {
   return () => clearTimeout(timer)
 }
 
-module.exports = { start, check, finalMessage, FOLLOW, RIVALS }
+// "bot scores": list every followed team's game on today's board with its state.
+const todaySummary = async () => {
+  const events = await fetchScoreboard()
+  const lines = []
+  for (const event of events) {
+    const comp = event.competitions[0]
+    if (!comp.competitors.some(t => FOLLOW.includes(t.team.abbreviation))) continue
+    const st = comp.status.type
+    const when = st.state === 'pre' ? st.shortDetail : st.state === 'in' ? `LIVE ${st.shortDetail}` : 'Final'
+    lines.push(`${esc(event.shortName)} — ${esc(when)}`)
+  }
+  if (!lines.length) return `No games on the board for ${FOLLOW.join(', ')} right now.`
+  return `Watching ${FOLLOW.join(', ')}. Polling every ${LIVE_INTERVAL / 1000}s during games.\n\n${lines.join('\n')}`
+}
+
+// "bot test final": a fake final so the spoiler formatting can be checked.
+const sampleFinal = () => finalMessage({
+  id: 'sample',
+  competitions: [{
+    status: { type: { state: 'post' } },
+    competitors: [
+      { team: { abbreviation: FOLLOW[0] || 'ALA', displayName: 'Alabama Crimson Tide', shortDisplayName: 'Crimson Tide' }, score: '31', homeAway: 'away', winner: true, curatedRank: { current: 3 } },
+      { team: { abbreviation: 'UK', displayName: 'Kentucky Wildcats', shortDisplayName: 'Wildcats' }, score: '10', homeAway: 'home', winner: false, curatedRank: { current: 99 } },
+    ],
+  }],
+})
+
+module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, FOLLOW, RIVALS }
