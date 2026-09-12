@@ -48,18 +48,18 @@ const getTextOnPhoto = async (text, photo) => {
 }
 
 const getGif = async (searchTerm) => {
-  let gif
+  if (!process.env.GIF_KEY) return null
   try {
-    const response = await axios.get(`${GIF_URL}&q=${searchTerm}`)
-    if (response.data.results) {
-      const randomInt = getRandomInt(response.data.results.length)
-      gif = response.data.results[randomInt].url
+    const response = await axios.get(`${GIF_URL}&q=${encodeURIComponent(searchTerm)}&media_filter=gif&limit=20`, { timeout: 10000 })
+    const results = response.data && response.data.results
+    if (results && results.length) {
+      const pick = results[getRandomInt(results.length)]
+      return (pick.media_formats && pick.media_formats.gif && pick.media_formats.gif.url) || pick.url
     }
-  } catch(e){
-    console.log(e)
-    bot.sendMessage(chat_id, "Not today I'm broken")
+  } catch (e) {
+    console.error('gif lookup failed', e.message)
   }
-  return gif
+  return null
 }
 
 module.exports = {

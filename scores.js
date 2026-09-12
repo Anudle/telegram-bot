@@ -2,6 +2,7 @@
 // Polls ESPN's public scoreboard (no API key) and posts to the chat when a
 // followed team's game goes final. Rival losses get a gloat.
 const axios = require('axios')
+const { getGif } = require('./api')
 
 const SCOREBOARD_URL =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=400'
@@ -17,6 +18,14 @@ const CHEERS = {
   MICH: 'Go Blue',
   COLO: 'Sko Buffs',
   CSU: 'I said it SUCKS to be a CSU RAM!',
+}
+
+// Tenor search terms for the celebration gif after a win.
+const WIN_GIFS = {
+  ALA: ['roll tide', 'alabama crimson tide celebration', 'nick saban'],
+  MICH: ['go blue', 'michigan wolverines celebration', 'michigan football'],
+  COLO: ['sko buffs', 'colorado buffaloes', 'ralphie buffalo'],
+  CSU: ['csu rams', 'colorado state rams', 'cam the ram'],
 }
 
 // gameId -> last seen state string ('pre' | 'in' | 'post')
@@ -61,7 +70,14 @@ const fetchScoreboard = async () => {
   return (res.data && res.data.events) || []
 }
 
+// Followed teams that won this game, for the celebration gif.
+const winners = (event) => {
+  const comp = event.competitions[0]
+  return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && t.winner })
+}
+
 // One poll. Returns the list of messages that should be sent.
+// Each entry: { text, gifTeams }
 const check = async () => {
   const events = await fetchScoreboard()
   const out = []
@@ -76,7 +92,7 @@ const check = async () => {
     // doesn't replay every final from Saturday.
     if (prev && prev !== 'post' && state === 'post') {
       const msg = finalMessage(event)
-      if (msg) out.push(msg)
+      if (msg) out.push({ text: msg, gifTeams: winners(event) })
       if (onFinal) {
         for (const abbr of FOLLOW) {
           const t = pickTeam(comp, abbr)
@@ -101,7 +117,10 @@ const start = (bot, chatId) => {
     let interval = IDLE_INTERVAL
     try {
       const msgs = await check()
-      for (const m of msgs) await bot.sendMessage(chatId, m, { parse_mode: 'HTML' })
+      for (const m of msgs) {
+        await bot.sendMessage(chatId, m.text, { parse_mode: 'HTML' })
+        for (const abbr of m.gifTeams) await sendWinGif(bot, chatId, abbr)
+      }
       if ([...seen.values()].includes('in')) interval = LIVE_INTERVAL
     } catch (e) {
       console.error('score poll failed', e.message)
@@ -110,6 +129,23 @@ const start = (bot, chatId) => {
   }
   tick()
   return () => clearTimeout(timer)
+}
+
+// Post a celebration gif for a winning team. Sent as a spoiler-free
+// follow-up, so it only goes out after the masked final. Skipped quietly
+// when GIF_KEY isn't set or Tenor has nothing.
+const sendWinGif = async (bot, chatId, abbr) => {
+  const terms = WIN_GIFS[abbr] || [abbr]
+  const term = terms[Math.floor(Math.random() * terms.length)]
+  const gif = await getGif(term)
+  if (!gif) return false
+  try {
+    await bot.sendAnimation(chatId, gif, { has_spoiler: true })
+    return true
+  } catch (e) {
+    console.error('win gif failed', e.message)
+    return false
+  }
 }
 
 // "bot scores": list every followed team's game on today's board with its state.
@@ -139,4 +175,4 @@ const sampleFinal = () => finalMessage({
   }],
 })
 
-module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, FOLLOW, RIVALS }
+module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, sendWinGif, FOLLOW, RIVALS }
