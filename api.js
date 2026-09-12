@@ -1,4 +1,3 @@
-const GIF_URL =  `https://g.tenor.com/v2/search?key=${process.env.GIF_KEY}`
 
 require('dotenv').config();
 const axios = require("axios");
@@ -47,17 +46,25 @@ const getTextOnPhoto = async (text, photo) => {
   return textOverPictureURL
 }
 
+// GIF search via Klipy (Tenor's API shut down June 2026; Klipy is the
+// drop-in successor). Key from https://partner.klipy.com/api-keys.
+const KLIPY_KEY = process.env.KLIPY_KEY || process.env.GIF_KEY
+
 const getGif = async (searchTerm) => {
-  if (!process.env.GIF_KEY) return null
+  if (!KLIPY_KEY) return null
   try {
-    const response = await axios.get(`${GIF_URL}&q=${encodeURIComponent(searchTerm)}&media_filter=gif&limit=20`, { timeout: 10000 })
-    const results = response.data && response.data.results
+    const url = `https://api.klipy.com/api/v1/${KLIPY_KEY}/gifs/search?q=${encodeURIComponent(searchTerm)}&per_page=20&content_filter=medium`
+    const response = await axios.get(url, { timeout: 10000 })
+    const results = response.data && response.data.result && response.data.data && response.data.data.data
     if (results && results.length) {
       const pick = results[getRandomInt(results.length)]
-      return (pick.media_formats && pick.media_formats.gif && pick.media_formats.gif.url) || pick.url
+      const f = pick.file || {}
+      // mp4 is ~30x smaller than the gif and Telegram plays it as an animation
+      const media = (f.md && f.md.mp4) || (f.md && f.md.gif) || (f.hd && f.hd.gif) || (f.sm && f.sm.gif)
+      return media && media.url
     }
   } catch (e) {
-    console.error('gif lookup failed', e.message)
+    console.error('gif lookup failed', e.response ? JSON.stringify(e.response.data) : e.message)
   }
   return null
 }

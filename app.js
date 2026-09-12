@@ -67,14 +67,14 @@ for (const b of allBots) {
       if (text === 'bot test final') {
         await b.sendMessage(msg.chat.id, scores.sampleFinal(), { parse_mode: 'HTML' })
         const sent = await scores.sendWinGif(b, msg.chat.id, scores.FOLLOW[0])
-        if (!sent) await b.sendMessage(msg.chat.id, process.env.GIF_KEY ? 'no gif found' : 'no gif: GIF_KEY not set')
+        if (!sent) await b.sendMessage(msg.chat.id, process.env.KLIPY_KEY ? 'no gif found' : 'no gif: KLIPY_KEY not set')
         return
       }
       // "bot test gif csu"
       const g = text.match(/^bot test gif (\w+)$/)
       if (g) {
         const sent = await scores.sendWinGif(b, msg.chat.id, g[1].toUpperCase())
-        if (!sent) await b.sendMessage(msg.chat.id, process.env.GIF_KEY ? 'no gif found' : 'no gif: GIF_KEY not set')
+        if (!sent) await b.sendMessage(msg.chat.id, process.env.KLIPY_KEY ? 'no gif found' : 'no gif: KLIPY_KEY not set')
         return
       }
     } catch (e) { console.error('command failed', e) }
