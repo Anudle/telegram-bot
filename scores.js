@@ -179,11 +179,7 @@ const start = (bot, chatId) => {
     let interval = IDLE_INTERVAL
     try {
       const msgs = await check()
-      for (const m of msgs) {
-        await bot.sendMessage(chatId, m.text, { parse_mode: 'HTML' })
-        for (const abbr of m.gifTeams) await sendWinGif(bot, chatId, abbr)
-        for (const abbr of m.lossTeams) await sendLossGif(bot, chatId, abbr)
-      }
+      for (const m of msgs) await postResult(bot, chatId, m)
       if ([...seen.values()].includes('in')) interval = LIVE_INTERVAL
     } catch (e) {
       console.error('score poll failed', e.message)
@@ -240,16 +236,37 @@ const todaySummary = async () => {
   return `Watching ${FOLLOW.join(', ')}. Polling every ${LIVE_INTERVAL / 1000}s during games.\n\n${lines.join('\n')}`
 }
 
-// "bot test final": a fake final so the spoiler formatting can be checked.
-const sampleFinal = () => finalMessage({
-  id: 'sample',
-  competitions: [{
-    status: { type: { state: 'post' } },
-    competitors: [
-      { team: { abbreviation: FOLLOW[0] || 'ALA', displayName: 'Alabama Crimson Tide', shortDisplayName: 'Crimson Tide' }, score: '31', homeAway: 'away', winner: true, curatedRank: { current: 3 } },
-      { team: { abbreviation: 'UK', displayName: 'Kentucky Wildcats', shortDisplayName: 'Wildcats' }, score: '10', homeAway: 'home', winner: false, curatedRank: { current: 99 } },
-    ],
-  }],
-})
+// "bot test final [team] [loss]": a fake final so the whole sequence can be
+// checked. Returns { text, gifTeams, lossTeams } like a real poll result.
+const SAMPLE_TEAMS = {
+  ALA: { displayName: 'Alabama Crimson Tide', shortDisplayName: 'Crimson Tide', rank: 3 },
+  MICH: { displayName: 'Michigan Wolverines', shortDisplayName: 'Wolverines', rank: 12 },
+  COLO: { displayName: 'Colorado Buffaloes', shortDisplayName: 'Buffaloes', rank: 99 },
+  CSU: { displayName: 'Colorado State Rams', shortDisplayName: 'Rams', rank: 99 },
+}
+const sampleFinal = (abbr = FOLLOW[0] || 'ALA', won = true) => {
+  const team = SAMPLE_TEAMS[abbr] || { displayName: abbr, shortDisplayName: abbr, rank: 99 }
+  const event = {
+    id: 'sample',
+    shortName: `${abbr} @ UK`,
+    competitions: [{
+      status: { type: { state: 'post' } },
+      competitors: [
+        { team: { abbreviation: abbr, ...team }, score: won ? '31' : '10', homeAway: 'away', winner: won, curatedRank: { current: team.rank } },
+        { team: { abbreviation: 'UK', displayName: 'Kentucky Wildcats', shortDisplayName: 'Wildcats' }, score: won ? '10' : '31', homeAway: 'home', winner: !won, curatedRank: { current: 99 } },
+      ],
+    }],
+  }
+  const text = finalMessage(event)
+  if (!text) return null
+  return { text, gifTeams: winners(event), lossTeams: losers(event) }
+}
 
-module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, sendWinGif, sendLossGif, FOLLOW, RIVALS }
+// Send one poll result (real or sample) to a chat: masked final, then gifs.
+const postResult = async (bot, chatId, m) => {
+  await bot.sendMessage(chatId, m.text, { parse_mode: 'HTML' })
+  for (const abbr of m.gifTeams) await sendWinGif(bot, chatId, abbr)
+  for (const abbr of m.lossTeams) await sendLossGif(bot, chatId, abbr)
+}
+
+module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, postResult, sendWinGif, sendLossGif, FOLLOW, RIVALS }
