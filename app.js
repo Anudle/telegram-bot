@@ -70,10 +70,11 @@ for (const b of allBots) {
         if (!sent) await b.sendMessage(msg.chat.id, process.env.KLIPY_KEY ? 'no gif found' : 'no gif: KLIPY_KEY not set')
         return
       }
-      // "bot test gif csu"
-      const g = text.match(/^bot test gif (\w+)$/)
+      // "bot test gif csu" / "bot test gif csu loss"
+      const g = text.match(/^bot test gif (\w+)( loss)?$/)
       if (g) {
-        const sent = await scores.sendWinGif(b, msg.chat.id, g[1].toUpperCase())
+        const fn = g[2] ? scores.sendLossGif : scores.sendWinGif
+        const sent = await fn(b, msg.chat.id, g[1].toUpperCase())
         if (!sent) await b.sendMessage(msg.chat.id, process.env.KLIPY_KEY ? 'no gif found' : 'no gif: KLIPY_KEY not set')
         return
       }

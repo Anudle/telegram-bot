@@ -66,6 +66,23 @@ const WIN_GIFS = {
   ] },
 }
 
+// Consolation gif after a loss: shared pool plus anything team-specific.
+const LOSS_GIFS_SHARED = [
+  'crying-jordan-13',              // Crying Jordan
+  'michael-jordan-mj-10',          // Crying Jordan "NOOOOOO"
+  'sad-pablo-lonely-5',            // sad Pablo Escobar
+  'this-is-fine-fire-6',           // This Is Fine dog
+  'tom-brady-defeated',            // Brady sitting on the field
+  'well-that-sucks-randy-marsh-1', // Randy Marsh: well that sucks
+  'bob-parr-incredibles',          // sad Mr. Incredible
+  'spongebob-walk',                // Spongebob sad walk
+  'conan-o-brien-why',             // Conan: WHYYYYY
+]
+const LOSS_GIFS_TEAM = {
+  MICH: ['michigan-fan-crying-michigan-football', 'kid-crying-14'],
+  ALA: ['saban-bama'],             // Saban: DAMMIT
+}
+
 // gameId -> last seen state string ('pre' | 'in' | 'post')
 const seen = new Map()
 
@@ -111,10 +128,14 @@ const fetchScoreboard = async () => {
   return (res.data && res.data.events) || []
 }
 
-// Followed teams that won this game, for the celebration gif.
+// Followed teams that won / lost this game, for the follow-up gif.
 const winners = (event) => {
   const comp = event.competitions[0]
   return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && t.winner })
+}
+const losers = (event) => {
+  const comp = event.competitions[0]
+  return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && !t.winner })
 }
 
 // One poll. Returns the list of messages that should be sent.
@@ -133,7 +154,7 @@ const check = async () => {
     // doesn't replay every final from Saturday.
     if (prev && prev !== 'post' && state === 'post') {
       const msg = finalMessage(event)
-      if (msg) out.push({ text: msg, gifTeams: winners(event) })
+      if (msg) out.push({ text: msg, gifTeams: winners(event), lossTeams: losers(event) })
       if (onFinal) {
         for (const abbr of FOLLOW) {
           const t = pickTeam(comp, abbr)
@@ -161,6 +182,7 @@ const start = (bot, chatId) => {
       for (const m of msgs) {
         await bot.sendMessage(chatId, m.text, { parse_mode: 'HTML' })
         for (const abbr of m.gifTeams) await sendWinGif(bot, chatId, abbr)
+        for (const abbr of m.lossTeams) await sendLossGif(bot, chatId, abbr)
       }
       if ([...seen.values()].includes('in')) interval = LIVE_INTERVAL
     } catch (e) {
@@ -186,6 +208,19 @@ const sendWinGif = async (bot, chatId, abbr) => {
     return true
   } catch (e) {
     console.error('win gif failed', e.message)
+    return false
+  }
+}
+
+const sendLossGif = async (bot, chatId, abbr) => {
+  const pool = [...LOSS_GIFS_SHARED, ...(LOSS_GIFS_TEAM[abbr] || [])]
+  const gif = await getGifBySlug(pickRandom(pool))
+  if (!gif) return false
+  try {
+    await bot.sendAnimation(chatId, gif, { has_spoiler: true })
+    return true
+  } catch (e) {
+    console.error('loss gif failed', e.message)
     return false
   }
 }
@@ -217,4 +252,4 @@ const sampleFinal = () => finalMessage({
   }],
 })
 
-module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, sendWinGif, FOLLOW, RIVALS }
+module.exports = { start, check, finalMessage, setOnFinal, todaySummary, sampleFinal, sendWinGif, sendLossGif, FOLLOW, RIVALS }
