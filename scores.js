@@ -2,7 +2,7 @@
 // Polls ESPN's public scoreboard (no API key) and posts to the chat when a
 // followed team's game goes final. Rival losses get a gloat.
 const axios = require('axios')
-const { getGif } = require('./api')
+const { getGif, getGifBySlug } = require('./api')
 
 const SCOREBOARD_URL =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=400'
@@ -20,12 +20,50 @@ const CHEERS = {
   CSU: 'I said it SUCKS to be a CSU RAM!',
 }
 
-// Tenor search terms for the celebration gif after a win.
+// Per-team lines inside the spoiler. Defaults: "<Cheer>! <Team> win." and
+// "<Team> lost. Rough one."
+const WIN_LINES = {
+  CSU: 'Rams win but it still sucks to be a CSU Ram.',
+}
+const LOSS_LINES = {
+  CSU: 'Rams lost. It sucks to be a CSU Ram.',
+}
+
+// Celebration gif after a win. Either `search` terms (one picked at random,
+// good when Klipy's tagging for the team is clean) or curated `slugs`
+// (needed for smaller programs where search drifts to LA Rams / Sopranos).
+// Browse https://klipy.com to find more slugs.
 const WIN_GIFS = {
-  ALA: ['roll tide', 'alabama crimson tide celebration', 'nick saban'],
-  MICH: ['go blue', 'michigan wolverines celebration', 'michigan football'],
-  COLO: ['sko buffs', 'colorado buffaloes', 'ralphie buffalo'],
-  CSU: ['csu rams', 'colorado state rams', 'cam the ram'],
+  ALA: { search: ['roll tide', 'alabama crimson tide', 'nick saban'] },
+  MICH: { search: ['go blue', 'michigan wolverines', 'michigan football'] },
+  COLO: { slugs: [
+    'sko-buffaloes',              // Ralphie runs onto the field
+    'ralphie-colorado',           // Ralphie and Colorado football
+    'ralphie-5',                  // Ralphie mascot on the field
+    'deon-sanders-cu-buffalos',   // Deion riding a buffalo
+    'coachprime-colorado',        // Coach Prime praises God
+    'do-you-believe',             // Deion: do you believe now?
+    'deion-sanders-4',            // Deion sideline: I'm coming
+    'shedeur-shedeur-sanders',    // Shedeur vs TCU
+    'shedeur-cu',                 // get Shedeur'd on
+    'travis-hunter-travishunter', // Travis Hunter reacts
+    'cu-buffs-colorado',          // ref's touchdown signal
+    'colorado-fan-buffs',         // Colorado fan
+    'peggycoppom-playoffpeggy',   // Playoff Peggy
+  ] },
+  CSU: { slugs: [
+    'colorado-state-rams-dancing',    // Rams fan dancing
+    'csu-rams-colorado-state-rams-1', // Cam the Ram up close
+    'colorado-state-rams-csu-1',      // fan in ram costume
+    'colorado-state-rams-flag',       // flag
+    'colorado-state-rams',            // logo animation
+    'colorado-state-rams-rams',       // team huddle
+    'colorado-state-rams-csu-rams',   // team huddle 2
+    'colorado-state-rams-csu',        // player "can't hear you"
+    'colorado-state-rams-black-prez', // boombox
+    'csu-bauta',                      // football action
+    'cam-ram',                        // Cam the Ram
+  ] },
 }
 
 // gameId -> last seen state string ('pre' | 'in' | 'post')
@@ -53,7 +91,10 @@ const finalMessage = (event) => {
     if (!t) continue
     ours = true
     const cheer = CHEERS[abbr] || abbr
-    hidden.push(t.winner ? `${esc(cheer)}! ${esc(t.team.shortDisplayName)} win.` : `${esc(t.team.shortDisplayName)} lost. Rough one.`)
+    const line = t.winner
+      ? (WIN_LINES[abbr] || `${cheer}! ${t.team.shortDisplayName} win.`)
+      : (LOSS_LINES[abbr] || `${t.team.shortDisplayName} lost. Rough one.`)
+    hidden.push(esc(line))
   }
   for (const abbr of RIVALS) {
     const t = pickTeam(comp, abbr)
@@ -134,10 +175,11 @@ const start = (bot, chatId) => {
 // Post a celebration gif for a winning team. Sent as a spoiler-free
 // follow-up, so it only goes out after the masked final. Skipped quietly
 // when GIF_KEY isn't set or Tenor has nothing.
+const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)]
+
 const sendWinGif = async (bot, chatId, abbr) => {
-  const terms = WIN_GIFS[abbr] || [abbr]
-  const term = terms[Math.floor(Math.random() * terms.length)]
-  const gif = await getGif(term)
+  const cfg = WIN_GIFS[abbr] || { search: [abbr] }
+  const gif = cfg.slugs ? await getGifBySlug(pickRandom(cfg.slugs)) : await getGif(pickRandom(cfg.search))
   if (!gif) return false
   try {
     await bot.sendAnimation(chatId, gif, { has_spoiler: true })

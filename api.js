@@ -69,7 +69,25 @@ const getGif = async (searchTerm) => {
   return null
 }
 
+// Fetch a specific gif by Klipy slug (for curated, hand-picked sets).
+const getGifBySlug = async (slug) => {
+  if (!KLIPY_KEY) return null
+  try {
+    const url = `https://api.klipy.com/api/v1/${KLIPY_KEY}/gifs/items?slugs=${encodeURIComponent(slug)}`
+    const response = await axios.get(url, { timeout: 10000 })
+    const list = response.data && response.data.data && (Array.isArray(response.data.data) ? response.data.data : response.data.data.data)
+    const pick = list && list[0]
+    const f = (pick && pick.file) || {}
+    const media = (f.md && f.md.mp4) || (f.md && f.md.gif) || (f.hd && f.hd.gif) || (f.sm && f.sm.gif)
+    return media && media.url
+  } catch (e) {
+    console.error('gif slug lookup failed', e.response ? JSON.stringify(e.response.data) : e.message)
+  }
+  return null
+}
+
 module.exports = {
+  getGifBySlug,
   getRandomPhoto,
   getGif,
   getTextOnPhoto,
