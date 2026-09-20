@@ -88,6 +88,17 @@ const seen = new Map()
 
 const pickTeam = (comp, abbr) => comp.competitors.find(t => t.team.abbreviation === abbr)
 
+// Did this competitor win? ESPN's `winner` flag is filled in a beat after the
+// status flips to final, so on the first poll that sees a final it is often
+// still missing and would read as a loss. The score is always there, so use
+// it; fall back to the flag only for a tie.
+const didWin = (comp, t) => {
+  const other = comp.competitors.find(o => o !== t)
+  const mine = Number(t.score), theirs = Number(other && other.score)
+  if (Number.isFinite(mine) && Number.isFinite(theirs) && mine !== theirs) return mine > theirs
+  return t.winner === true
+}
+
 // Messages use Telegram HTML parse mode so the result can be wrapped in a
 // tap-to-reveal spoiler. Team names like "Texas A&M" need escaping.
 const esc = (str) => String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -108,7 +119,7 @@ const finalMessage = (event) => {
     if (!t) continue
     ours = true
     const cheer = CHEERS[abbr] || abbr
-    const line = t.winner
+    const line = didWin(comp, t)
       ? (WIN_LINES[abbr] || `${cheer}! ${t.team.shortDisplayName} win.`)
       : (LOSS_LINES[abbr] || `${t.team.shortDisplayName} lost. Rough one.`)
     hidden.push(esc(line))
@@ -117,7 +128,7 @@ const finalMessage = (event) => {
     const t = pickTeam(comp, abbr)
     if (!t) continue
     ours = true
-    if (!t.winner) hidden.push(`${esc(t.team.displayName)} lost 😂 ${abbr} sucks`)
+    if (!didWin(comp, t)) hidden.push(`${esc(t.team.displayName)} lost 😂 ${abbr} sucks`)
   }
   if (!ours) return null
   return `🏈 FINAL: ${matchup}\n${spoiler(hidden.join('\n'))}`
@@ -131,11 +142,11 @@ const fetchScoreboard = async () => {
 // Followed teams that won / lost this game, for the follow-up gif.
 const winners = (event) => {
   const comp = event.competitions[0]
-  return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && t.winner })
+  return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && didWin(comp, t) })
 }
 const losers = (event) => {
   const comp = event.competitions[0]
-  return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && !t.winner })
+  return FOLLOW.filter(abbr => { const t = pickTeam(comp, abbr); return t && !didWin(comp, t) })
 }
 
 // One poll. Returns the list of messages that should be sent.
@@ -158,7 +169,7 @@ const check = async () => {
       if (onFinal) {
         for (const abbr of FOLLOW) {
           const t = pickTeam(comp, abbr)
-          if (t) onFinal(event.id, abbr, !!t.winner, event.shortName)
+          if (t) onFinal(event.id, abbr, didWin(comp, t), event.shortName)
         }
       }
     }
