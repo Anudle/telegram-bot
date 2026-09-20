@@ -64,8 +64,23 @@ for (const b of allBots) {
       if (text === 'bot scores') {
         return await b.sendMessage(msg.chat.id, await scores.todaySummary(), { parse_mode: 'HTML' })
       }
-      if (text === 'bot test final') {
-        return await b.sendMessage(msg.chat.id, scores.sampleFinal(), { parse_mode: 'HTML' })
+      // "bot test final" / "bot test final csu" / "bot test final mich loss"
+      const tf = text.match(/^bot test final(?: (\w+))?( loss)?$/)
+      if (tf) {
+        const abbr = (tf[1] || scores.FOLLOW[0] || 'ALA').toUpperCase()
+        const sample = scores.sampleFinal(abbr, !tf[2])
+        if (!sample) return await b.sendMessage(msg.chat.id, `${abbr} isn't a followed team (${scores.FOLLOW.join(', ')})`)
+        await scores.postResult(b, msg.chat.id, sample)
+        if (!process.env.KLIPY_KEY) await b.sendMessage(msg.chat.id, 'no gif: KLIPY_KEY not set')
+        return
+      }
+      // "bot test gif csu" / "bot test gif csu loss"
+      const g = text.match(/^bot test gif (\w+)( loss)?$/)
+      if (g) {
+        const fn = g[2] ? scores.sendLossGif : scores.sendWinGif
+        const sent = await fn(b, msg.chat.id, g[1].toUpperCase())
+        if (!sent) await b.sendMessage(msg.chat.id, process.env.KLIPY_KEY ? 'no gif found' : 'no gif: KLIPY_KEY not set')
+        return
       }
     } catch (e) { console.error('command failed', e) }
   })

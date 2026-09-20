@@ -1,4 +1,3 @@
-const GIF_URL =  `https://g.tenor.com/v2/search?key=${process.env.GIF_KEY}`
 
 require('dotenv').config();
 const axios = require("axios");
@@ -47,22 +46,48 @@ const getTextOnPhoto = async (text, photo) => {
   return textOverPictureURL
 }
 
+// GIF search via Klipy (Tenor's API shut down June 2026; Klipy is the
+// drop-in successor). Key from https://partner.klipy.com/api-keys.
+const KLIPY_KEY = process.env.KLIPY_KEY || process.env.GIF_KEY
+
 const getGif = async (searchTerm) => {
-  let gif
+  if (!KLIPY_KEY) return null
   try {
-    const response = await axios.get(`${GIF_URL}&q=${searchTerm}`)
-    if (response.data.results) {
-      const randomInt = getRandomInt(response.data.results.length)
-      gif = response.data.results[randomInt].url
+    const url = `https://api.klipy.com/api/v1/${KLIPY_KEY}/gifs/search?q=${encodeURIComponent(searchTerm)}&per_page=20&content_filter=medium`
+    const response = await axios.get(url, { timeout: 10000 })
+    const results = response.data && response.data.result && response.data.data && response.data.data.data
+    if (results && results.length) {
+      const pick = results[getRandomInt(results.length)]
+      const f = pick.file || {}
+      // mp4 is ~30x smaller than the gif and Telegram plays it as an animation
+      const media = (f.md && f.md.mp4) || (f.md && f.md.gif) || (f.hd && f.hd.gif) || (f.sm && f.sm.gif)
+      return media && media.url
     }
-  } catch(e){
-    console.log(e)
-    bot.sendMessage(chat_id, "Not today I'm broken")
+  } catch (e) {
+    console.error('gif lookup failed', e.response ? JSON.stringify(e.response.data) : e.message)
   }
-  return gif
+  return null
+}
+
+// Fetch a specific gif by Klipy slug (for curated, hand-picked sets).
+const getGifBySlug = async (slug) => {
+  if (!KLIPY_KEY) return null
+  try {
+    const url = `https://api.klipy.com/api/v1/${KLIPY_KEY}/gifs/items?slugs=${encodeURIComponent(slug)}`
+    const response = await axios.get(url, { timeout: 10000 })
+    const list = response.data && response.data.data && (Array.isArray(response.data.data) ? response.data.data : response.data.data.data)
+    const pick = list && list[0]
+    const f = (pick && pick.file) || {}
+    const media = (f.md && f.md.mp4) || (f.md && f.md.gif) || (f.hd && f.hd.gif) || (f.sm && f.sm.gif)
+    return media && media.url
+  } catch (e) {
+    console.error('gif slug lookup failed', e.response ? JSON.stringify(e.response.data) : e.message)
+  }
+  return null
 }
 
 module.exports = {
+  getGifBySlug,
   getRandomPhoto,
   getGif,
   getTextOnPhoto,
