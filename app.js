@@ -15,6 +15,7 @@ const schedule = require('node-schedule');
 const scores = require('./scores');
 const { logMessage, logFinal, chatsWithMessages } = require('./db');
 const { postWrapped } = require('./wrapped');
+const birthdays = require('./birthdays');
 
 
 
@@ -25,8 +26,11 @@ const { postWrapped } = require('./wrapped');
 const app = express();
 app.use(express.json());
 
-const makeBot = (t) => {
+const makeBot = (t, { sendOnly = false } = {}) => {
   let b
+  // Send-only bots never poll or register a webhook, so they can safely share a
+  // token with another process (e.g. a bot whose code lives elsewhere).
+  if (sendOnly) return new TelegramBot(t)
   // Webhook mode only when a public URL is configured; otherwise long-poll,
   // which works on any host with no inbound port.
   if (process.env.WEBHOOK_URL) {
@@ -43,6 +47,9 @@ const makeBot = (t) => {
 const bot = makeBot(token)
 const birthdayBot = process.env.BIRTHDAY_BOT_TOKEN && process.env.BIRTHDAY_BOT_TOKEN !== token ? makeBot(process.env.BIRTHDAY_BOT_TOKEN) : bot
 const scoreBot = process.env.SCORE_BOT_TOKEN && process.env.SCORE_BOT_TOKEN !== token ? makeBot(process.env.SCORE_BOT_TOKEN) : bot
+// Third identity for the core friend group (r2D3 bot). Its code lives elsewhere,
+// so here it is only used to send birthday posts; it never polls.
+const coreBot = process.env.CORE_BOT_TOKEN ? makeBot(process.env.CORE_BOT_TOKEN, { sendOnly: true }) : null
 const allBots = [...new Set([bot, birthdayBot, scoreBot])]
 
 // "bot wrapped" in any group posts that group's Wrapped on demand.
@@ -60,6 +67,13 @@ for (const b of allBots) {
       // setup + testing helpers
       if (text === '/chatid' || text === 'bot chatid') {
         return await b.sendMessage(msg.chat.id, `chat id: <code>${msg.chat.id}</code>`, { parse_mode: 'HTML' })
+      }
+      // "bot test birthday sam" previews that person's message here
+      const tb = text.match(/^bot test birthday (.+)$/)
+      if (tb) {
+        const person = birthdays.findByName(tb[1])
+        if (!person) return await b.sendMessage(msg.chat.id, `no birthday on file for ${tb[1]}`)
+        return await birthdays.sendBirthday(b, msg.chat.id, person, birthdays.todayIn(TZ).year)
       }
       if (text === 'bot scores') {
         return await b.sendMessage(msg.chat.id, await scores.todaySummary(), { parse_mode: 'HTML' })
@@ -86,16 +100,24 @@ for (const b of allBots) {
   })
 }
 
-// Dec 31 at 10:00: post a Wrapped to every chat that had messages this year.
-schedule.scheduleJob('0 10 31 12 *', async () => {
+// All scheduled jobs run in this timezone (Fly machines are UTC).
+const TZ = process.env.SCHEDULE_TZ || process.env.WRAPPED_TZ || 'America/Denver'
+
+// Which bot posts in which chat. Nothing is ever posted from a bot to a chat
+// that isn't its own, so there is no "try every bot" fallback anywhere.
+const botForChat = new Map()
+if (footballChat) botForChat.set(String(footballChat), scoreBot)
+if (dadChat) botForChat.set(String(dadChat), birthdayBot)
+if (process.env.CORE_CHAT_ID && coreBot) botForChat.set(String(process.env.CORE_CHAT_ID), coreBot)
+
+// Dec 31 at 10:00: post a Wrapped to each of our chats that had messages this year.
+schedule.scheduleJob({ rule: '0 10 31 12 *', tz: TZ }, async () => {
   const year = new Date().getFullYear()
   const from = Math.floor(Date.UTC(year, 0, 1) / 1000), to = Math.floor(Date.UTC(year + 1, 0, 1) / 1000)
   for (const { chat_id, title } of chatsWithMessages(from, to)) {
-    // pick whichever bot is a member of this chat; sendMessage from a
-    // non-member fails, so try each until one works
-    for (const b of allBots) {
-      try { await postWrapped(b, chat_id, title, year); break } catch (e) { /* try next bot */ }
-    }
+    const b = botForChat.get(String(chat_id))
+    if (!b) continue   // test chats and anything unconfigured are left alone
+    try { await postWrapped(b, chat_id, title, year) } catch (e) { console.error('wrapped failed', title, e.message) }
   }
 });
 
@@ -104,26 +126,25 @@ const gif_trigger = ['roll tide', 'rtr', 'go blue', 'sko buffs', 'denver lynx']
 const insult_trigger = ['ohio state', 'the sun', 'auburn', 'lsu']
 const insult_search = ['shit', 'sucks', 'chump', 'loser', 'stupid']
 const david_compliments = ['Roll tide my dude', 'you make a good point', "God you're so handsome David", 'Auburn is the worst', 'Can ABC just make you in charge of Disney already', 'How do you walk around with such a huge package David?']
-const dates =  [
-  { date: '2011-03-14T10:00:00Z', msg: 'Happy Pi Day!' },
-  { date: '2011-04-15T10:00:00Z', msg: 'Happy Birthday Anu!'},
-  { date: '2011-09-03T10:00:00Z', msg: 'Happy Birthday Lucas B!'},
-  { date: '2011-03-23T10:00:00Z', msg: 'Happy Birthday Brock!'},
-  { date: '2011-03-26T10:00:00Z', msg: 'Happy Birthday David!'},
-  { date: '2011-06-30T10:00:00Z', msg: 'Happy Birthday KB!'},
-  { date: '2011-07-05T10:00:00Z', msg: 'Happy Birthday Matt!'},
-  { date: '2011-12-15T10:00:00Z', msg: 'Happy Birthday Lucas C!'}
-]
-
-const job = schedule.scheduleJob('15 11 * * *', function(){
-  const today = new Date();
-  for(let i=0; i<dates.length; i++) {
-    let d = new Date(dates[i].date)
-    if (isToday(d))  {
-      if (dadChat) birthdayBot.sendMessage(dadChat, dates[i].msg)
-    }
-  }
+// Birthdays come from a private file (see birthdays.js), not from the repo.
+// "kids" go to the dad chat from the birthday bot; "core" go to the core group
+// from the core (r2D3) bot. A group with no bot or chat configured is skipped.
+schedule.scheduleJob({ rule: '15 9 * * *', tz: TZ }, async () => {
+  await birthdays.postToday({
+    kids: { bot: birthdayBot, chatId: dadChat },
+    core: { bot: coreBot, chatId: process.env.CORE_CHAT_ID },
+  }, TZ)
 });
+
+// 9:00 every morning: if any followed team plays today, post the slate.
+if (footballChat) {
+  schedule.scheduleJob({ rule: '0 9 * * *', tz: TZ }, async () => {
+    try {
+      const summary = await scores.gamedaySummary()
+      if (summary) await scoreBot.sendMessage(footballChat, summary, { parse_mode: 'HTML' })
+    } catch (e) { console.error('game day post failed', e.message) }
+  })
+}
 
 if (footballChat) {
   scores.setOnFinal((eventId, team, won, summary) => logFinal(footballChat, eventId, team, won, summary))
