@@ -75,6 +75,17 @@ for (const b of allBots) {
         if (!person) return await b.sendMessage(msg.chat.id, `no birthday on file for ${tb[1]}`)
         return await birthdays.sendBirthday(b, msg.chat.id, person, birthdays.todayIn(TZ).year)
       }
+      // "bot dryrun birthday 10-05" runs the real daily job for that date (default
+      // today), posting every matching birthday into THIS chat only. Safe for a
+      // personal test chat: nothing goes to the real groups.
+      const dr = text.match(/^bot dry ?run birthdays?(?: (\d{2}-\d{2}))?$/)
+      if (dr) {
+        const md = dr[1] || birthdays.todayIn(TZ).md
+        const n = birthdays.birthdaysOn(md).length
+        await b.sendMessage(msg.chat.id, `Dry run for ${md}: ${n} birthday${n === 1 ? '' : 's'} on file. Posting here only.`)
+        const here = { bot: b, chatId: msg.chat.id }
+        return await birthdays.postToday({ kids: here, core: here }, TZ, { md })
+      }
       if (text === 'bot scores') {
         return await b.sendMessage(msg.chat.id, await scores.todaySummary(), { parse_mode: 'HTML' })
       }

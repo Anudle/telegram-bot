@@ -109,9 +109,10 @@ const sendBirthday = async (bot, chatId, b, year) => {
 // Each route only reads the entries whose "group" matches its own name, so an
 // entry with no group (or an unknown one) is never sent anywhere. A route with
 // no bot or chat configured is skipped, never redirected to another chat.
-const postToday = async (routes, tz = TZ) => {
-  const { md, year } = todayIn(tz)
-  const todays = birthdaysOn(md)
+// opts.md ("MM-DD") overrides today's date, for dry runs.
+const postToday = async (routes, tz = TZ, opts = {}) => {
+  const { md: todayMd, year } = todayIn(tz)
+  const todays = birthdaysOn(opts.md || todayMd)
   for (const b of todays.filter(x => !routes[x.group])) console.error('birthday skipped, no such group:', b.group, b.name)
   for (const [group, route] of Object.entries(routes)) {
     for (const b of todays.filter(x => x.group === group)) {
@@ -121,4 +122,4 @@ const postToday = async (routes, tz = TZ) => {
   }
 }
 
-module.exports = { postToday, sendBirthday, buildMessage, findByName, todayIn, BIRTHDAYS_PATH }
+module.exports = { postToday, birthdaysOn, sendBirthday, buildMessage, findByName, todayIn, BIRTHDAYS_PATH }
