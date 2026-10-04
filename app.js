@@ -75,8 +75,16 @@ for (const b of allBots) {
         if (!person) return await b.sendMessage(msg.chat.id, `no birthday on file for ${tb[1]}`)
         return await birthdays.sendBirthday(b, msg.chat.id, person, birthdays.todayIn(TZ).year)
       }
-      if (text === 'bot scores') {
-        return await b.sendMessage(msg.chat.id, await scores.todaySummary(), { parse_mode: 'HTML' })
+      // "bot dryrun birthday 10-05" runs the real daily job for that date (default
+      // today), posting every matching birthday into THIS chat only. Safe for a
+      // personal test chat: nothing goes to the real groups.
+      const dr = text.match(/^bot dry ?run birthdays?(?: (\d{2}-\d{2}))?$/)
+      if (dr) {
+        const md = dr[1] || birthdays.todayIn(TZ).md
+        const n = birthdays.birthdaysOn(md).length
+        await b.sendMessage(msg.chat.id, `Dry run for ${md}: ${n} birthday${n === 1 ? '' : 's'} on file. Posting here only.`)
+        const here = { bot: b, chatId: msg.chat.id }
+        return await birthdays.postToday({ kids: here, core: here }, TZ, { md })
       }
       // "bot test final" / "bot test final csu" / "bot test final mich loss"
       const tf = text.match(/^bot test final(?: (\w+))?( loss)?$/)
@@ -136,16 +144,7 @@ schedule.scheduleJob({ rule: '15 9 * * *', tz: TZ }, async () => {
   }, TZ)
 });
 
-// 9:00 every morning: if any followed team plays today, post the slate.
-if (footballChat) {
-  schedule.scheduleJob({ rule: '0 9 * * *', tz: TZ }, async () => {
-    try {
-      const summary = await scores.gamedaySummary()
-      if (summary) await scoreBot.sendMessage(footballChat, summary, { parse_mode: 'HTML' })
-    } catch (e) { console.error('game day post failed', e.message) }
-  })
-}
-
+// The football chat only gets final scores: no game-day slate.
 if (footballChat) {
   scores.setOnFinal((eventId, team, won, summary) => logFinal(footballChat, eventId, team, won, summary))
   scores.start(scoreBot, footballChat)

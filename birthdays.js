@@ -1,7 +1,7 @@
 // Birthday greetings. The dates live in a private JSON file (gitignored, on the
 // Fly volume in production), never in the repo. Format:
 //   [ { "name": "Sam", "date": "07-04", "group": "core", "year": 2015 }, ... ]
-// "group" is "core" or "kids" (default kids). "year" is optional (adds "turns N"); "msg" optionally replaces the greeting.
+// "group" is required: "core" or "kids". "year" is optional (adds "turns N"); "msg" optionally replaces the greeting.
 const path = require('path')
 const fs = require('fs')
 const axios = require('axios')
@@ -105,17 +105,21 @@ const sendBirthday = async (bot, chatId, b, year) => {
   try { await bot.sendAnimation(chatId, gif) } catch (e) { console.error('birthday gif failed', e.message) }
 }
 
-// Send today's birthday messages. Each entry has a "group" ("core" or "kids",
-// default "kids") that picks its route from routes: { kids: { bot, chatId }, ... }.
-// A route is used as-is: there is no fallback to another bot or chat.
-const postToday = async (routes, tz = TZ) => {
-  const { md, year } = todayIn(tz)
-  for (const b of birthdaysOn(md)) {
-    const group = b.group || 'kids'
-    const route = routes[group]
-    if (!route || !route.bot || !route.chatId) { console.error('birthday skipped, group not configured:', group, b.name); continue }
-    try { await sendBirthday(route.bot, route.chatId, b, year) } catch (e) { console.error('birthday post failed', b.name, e.message) }
+// Send today's birthday messages. routes is { kids: { bot, chatId }, core: { ... } }.
+// Each route only reads the entries whose "group" matches its own name, so an
+// entry with no group (or an unknown one) is never sent anywhere. A route with
+// no bot or chat configured is skipped, never redirected to another chat.
+// opts.md ("MM-DD") overrides today's date, for dry runs.
+const postToday = async (routes, tz = TZ, opts = {}) => {
+  const { md: todayMd, year } = todayIn(tz)
+  const todays = birthdaysOn(opts.md || todayMd)
+  for (const b of todays.filter(x => !routes[x.group])) console.error('birthday skipped, no such group:', b.group, b.name)
+  for (const [group, route] of Object.entries(routes)) {
+    for (const b of todays.filter(x => x.group === group)) {
+      if (!route || !route.bot || !route.chatId) { console.error('birthday skipped, group not configured:', group, b.name); continue }
+      try { await sendBirthday(route.bot, route.chatId, b, year) } catch (e) { console.error('birthday post failed', b.name, e.message) }
+    }
   }
 }
 
-module.exports = { postToday, sendBirthday, buildMessage, findByName, todayIn, BIRTHDAYS_PATH }
+module.exports = { postToday, birthdaysOn, sendBirthday, buildMessage, findByName, todayIn, BIRTHDAYS_PATH }

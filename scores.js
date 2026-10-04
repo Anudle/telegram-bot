@@ -232,37 +232,6 @@ const sendLossGif = async (bot, chatId, abbr) => {
   }
 }
 
-// Today's games for followed teams, with kickoff, TV and spread.
-// Returns null when none of our teams play today.
-const TZ = process.env.SCHEDULE_TZ || process.env.WRAPPED_TZ || 'America/Denver'
-const fmtKick = (iso) => new Date(iso).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-
-const gamedaySummary = async () => {
-  const events = await fetchScoreboard()
-  const lines = []
-  for (const event of events) {
-    const comp = event.competitions[0]
-    if (!comp.competitors.some(t => FOLLOW.includes(t.team.abbreviation))) continue
-    const st = comp.status.type
-    const home = comp.competitors.find(t => t.homeAway === 'home')
-    const away = comp.competitors.find(t => t.homeAway === 'away')
-    const matchup = `${rank(away)}${esc(away.team.displayName)} @ ${rank(home)}${esc(home.team.displayName)}`
-    const tv = (comp.broadcasts && comp.broadcasts[0] && comp.broadcasts[0].names || []).join('/')
-    const odds = comp.odds && comp.odds[0] && comp.odds[0].details
-    const extras = [tv, odds].filter(Boolean).map(esc).join(' · ')
-    let when
-    if (st.state === 'pre') when = fmtKick(event.date)
-    else if (st.state === 'in') when = `LIVE, ${esc(st.shortDetail)}`
-    else when = 'Final'
-    lines.push(`<b>${matchup}</b>\n${when}${extras ? ` · ${extras}` : ''}`)
-  }
-  if (!lines.length) return null
-  return `🏈 <b>Game day</b>\n\n${lines.join('\n\n')}`
-}
-
-// "bot scores": same list, with a message when nothing is on.
-const todaySummary = async () => (await gamedaySummary()) || `No games today for ${FOLLOW.join(', ')}.`
-
 // "bot test final [team] [loss]": a fake final so the whole sequence can be
 // checked. Returns { text, gifTeams, lossTeams } like a real poll result.
 const SAMPLE_TEAMS = {
@@ -296,4 +265,4 @@ const postResult = async (bot, chatId, m) => {
   for (const abbr of m.lossTeams) await sendLossGif(bot, chatId, abbr)
 }
 
-module.exports = { start, check, finalMessage, setOnFinal, todaySummary, gamedaySummary, sampleFinal, postResult, sendWinGif, sendLossGif, FOLLOW, RIVALS }
+module.exports = { start, check, finalMessage, setOnFinal, sampleFinal, postResult, sendWinGif, sendLossGif, FOLLOW, RIVALS }
