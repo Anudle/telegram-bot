@@ -23,6 +23,10 @@ const birthdays = require('./birthdays');
 // dad chat, @final_score_bot in the football chat). Create each in BotFather
 // and drop the tokens in .env. Every bot receives updates from the groups it
 // is in so the message log (and the year-end Wrapped) covers every chat.
+// One bad message in a handler must not take down every bot in this process
+// (Telegram redelivers the unacknowledged update on restart, so it would loop).
+process.on('unhandledRejection', (reason) => console.error('unhandled rejection', reason))
+
 const app = express();
 app.use(express.json());
 
@@ -242,7 +246,8 @@ bot.on('text', async (ctx) => {
   }
   
   if (string.includes('$')) {
-    let symbol = await findString(string, '$')
+    // findString rejects when "$" isn't followed by a ticker (e.g. "$20"), which is not an error here
+    let symbol = await findString(string, '$').catch(() => null)
     if (symbol) {
       if (symbol.length > 6) {
         bot.sendMessage(chat_id, `Don't abuse the bot ${ucfirst(name)}`)
