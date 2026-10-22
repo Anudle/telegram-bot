@@ -42,7 +42,25 @@ const makeBot = (t, { sendOnly = false } = {}) => {
     b.setWebHook(process.env.WEBHOOK_URL + "/" + t);
     app.post('/' + t, (req, res) => { b.processUpdate(req.body); res.sendStatus(200); });
   } else {
-    b = new TelegramBot(t, { polling: true });
+    // The library sends getUpdates with no client-side timeout, so a connection
+    // that drops silently hangs the poll loop forever: the process looks healthy
+    // but never sees another message until it restarts, at which point Telegram
+    // hands over up to 24h of backlog all at once (hence replies hours late).
+    // A request timeout turns that hang into a polling_error, after which the
+    // library reschedules the next poll on its own. Long polls wait 10s server
+    // side, so 30s leaves plenty of room.
+    b = new TelegramBot(t, { polling: true, request: { timeout: 30000 } });
+    b.on('polling_error', (e) => console.error('polling error', e.code || '', e.message))
+    // Belt and braces: if no poll has completed in a while, restart polling
+    // (startPolling cancels the in-flight request and starts a fresh one).
+    const STALE_MS = 5 * 60 * 1000
+    setInterval(() => {
+      const last = b._polling && b._polling._lastUpdate
+      if (last && Date.now() - last > STALE_MS) {
+        console.error('polling stalled for', Math.round((Date.now() - last) / 1000), 's; restarting')
+        b.startPolling().catch(e => console.error('polling restart failed', e.message))
+      }
+    }, 60 * 1000).unref()
   }
   b.on('message', (msg) => { try { logMessage(msg) } catch (e) { console.error('log failed', e.message) } })
   return b
@@ -78,6 +96,13 @@ for (const b of allBots) {
         const person = birthdays.findByName(tb[1])
         if (!person) return await b.sendMessage(msg.chat.id, `no birthday on file for ${tb[1]}`)
         return await birthdays.sendBirthday(b, msg.chat.id, person, birthdays.todayIn(TZ).year)
+      }
+      // "bot list birthdays" shows everyone on file, sorted by date
+      if (/^bot list birthdays?$/.test(text)) {
+        const list = birthdays.listAll()
+        if (!list) return await b.sendMessage(msg.chat.id, 'no birthdays on file')
+        const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        return await b.sendMessage(msg.chat.id, `<pre>${esc(list)}</pre>`, { parse_mode: 'HTML' })
       }
       // "bot dryrun birthday 10-05" runs the real daily job for that date (default
       // today), posting every matching birthday into THIS chat only. Safe for a

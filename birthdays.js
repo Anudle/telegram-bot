@@ -122,4 +122,16 @@ const postToday = async (routes, tz = TZ, opts = {}) => {
   }
 }
 
-module.exports = { postToday, birthdaysOn, sendBirthday, buildMessage, findByName, todayIn, BIRTHDAYS_PATH }
+// Everyone on file, sorted by date, one line each: "Nov 30  Luna (kids)".
+// Returns null when the file is missing or empty.
+const listAll = () => {
+  const all = load().filter(b => b && b.name && /^\d{2}-\d{2}$/.test(b.date)).sort((a, b) => a.date.localeCompare(b.date))
+  if (!all.length) return null
+  return all.map(b => {
+    const [m, d] = b.date.split('-')
+    const month = MONTHS[Number(m) - 1] ? MONTHS[Number(m) - 1].slice(0, 3) : m
+    return `${month} ${String(Number(d)).padStart(2)}  ${b.name} (${b.group}${b.year ? `, ${b.year}` : ''})`
+  }).join('\n')
+}
+
+module.exports = { postToday, birthdaysOn, sendBirthday, buildMessage, findByName, listAll, todayIn, BIRTHDAYS_PATH }
